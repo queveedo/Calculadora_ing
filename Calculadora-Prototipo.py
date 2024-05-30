@@ -1,228 +1,261 @@
 import tkinter as tk
-from tkinter import messagebox
-from tkinter import ttk
+from tkinter import messagebox, ttk, filedialog
+import math
+import pandas as pd
+from openpyxl import Workbook
+from fpdf import FPDF
 
-def convertir_tasa(tasa, frecuencia):
-    if frecuencia == "Mensual":
-        tasa_anual = (1 + tasa) ** 12 - 1
-    elif frecuencia == "Bimestral":
-        tasa_anual = (1 + tasa) ** 6 - 1
-    elif frecuencia == "Trimestral":
-        tasa_anual = (1 + tasa) ** 4 - 1
-    elif frecuencia == "Cuatrimestral":
-        tasa_anual = (1 + tasa) ** 3 - 1
-    elif frecuencia == "Semestral":
-        tasa_anual = (1 + tasa) ** 2 - 1
-    elif frecuencia == "Anual":
-        tasa_anual = tasa
-    elif frecuencia =="Bimensual":
-        tasa_anual = (1 + tasa) ** 24 -1
+# Funciones de cálculo
+def calcular_pago_mensual(monto, tasa_mensual, meses):
+    if tasa_mensual == 0:
+        return monto / meses
+    return (monto * tasa_mensual) / (1 - (1 + tasa_mensual) ** -meses)
+
+def calcular_intereses_totales(monto, pago_mensual, meses):
+    total_pagado = pago_mensual * meses
+    intereses = total_pagado - monto
+    return intereses
+
+def calcular_duracion_en_meses(monto, pago_mensual, tasa_mensual):
+    if tasa_mensual == 0:
+        return monto / pago_mensual
+    meses = -math.log(1 - (monto * tasa_mensual) / pago_mensual) / math.log(1 + tasa_mensual)
+    return int(math.ceil(meses))
+
+def generar_amortizacion(monto, tasa_mensual, meses):
+    pago_mensual = calcular_pago_mensual(monto, tasa_mensual, meses)
+    detalles_amortizacion = []
+
+    saldo = monto
+    for mes in range(1, meses + 1):
+        interes = saldo * tasa_mensual
+        principal = pago_mensual - interes
+        saldo -= principal
+        detalles_amortizacion.append({
+            "Periodo": mes,
+            "Pago": pago_mensual,
+            "Interés": interes,
+            "Amortización": principal,
+            "Saldo Insoluto": saldo
+        })
+
+    return detalles_amortizacion
+
+# Función para manejar los cálculos
+def realizar_calculo():
+    try:
+        monto = float(limpiar_entrada(monto_entry.get()))
+        tasa_anual = float(limpiar_entrada(tasa_entry.get()))
+        pago_mensual_conocido = pago_mensual_entry.get()
+        capitalizacion = capitalizacion_var.get()
+        
+        if tasa_anual < 0:
+            raise ValueError("La tasa de interés no puede ser negativa.")
+
+        # Ajuste de la tasa de interés de acuerdo con el periodo de capitalización
+        if capitalizacion == 1:  # Mensual
+            tasa_mensual = tasa_anual / 12 / 100
+        elif capitalizacion == 2:  # Bimestral
+            tasa_mensual = tasa_anual / 100 / 6
+        elif capitalizacion == 3:  # Trimestral
+            tasa_mensual = tasa_anual / 100 / 4
+        elif capitalizacion == 6:  # Semestral
+            tasa_mensual = tasa_anual / 100 / 2
+        elif capitalizacion == 12:  # Anual
+            tasa_mensual = tasa_anual
+
+        if opcion_var.get() in (1, 2, 4):
+            plazo = plazo_entry.get()
+            if not plazo:
+                raise ValueError("Debe ingresar un valor para el periodo.")
+            plazo = int(plazo)
+
+        resultado_label.grid_remove()  # Ocultar el label antes de realizar un nuevo cálculo
+
+        if opcion_var.get() == 1:
+            pago_mensual = calcular_pago_mensual(monto, tasa_mensual, plazo)
+            resultado_text.set(f"Pago mensual: ${pago_mensual:.2f}")
+
+        elif opcion_var.get() == 2:
+            pago_mensual = calcular_pago_mensual(monto, tasa_mensual, plazo)
+            total_intereses = calcular_intereses_totales(monto, pago_mensual, plazo)
+            resultado_text.set(f"Total de intereses: ${total_intereses:.2f}")
+
+        elif opcion_var.get() == 3:
+            if not pago_mensual_conocido:
+                raise ValueError("Debe ingresar un valor para el pago mensual.")
+            pago_mensual = float(limpiar_entrada(pago_mensual_conocido))
+            if pago_mensual <= 0:
+                raise ValueError("El pago mensual debe ser mayor que cero.")
+            meses_para_pagar = calcular_duracion_en_meses(monto, pago_mensual, tasa_mensual)
+            resultado_text.set(f"Meses para pagar: {meses_para_pagar} meses")
+
+        elif opcion_var.get() == 4:
+            detalles_amortizacion = generar_amortizacion(monto, tasa_mensual, plazo)
+            mostrar_amortizacion(detalles_amortizacion)
+
+        resultado_label.grid()  # Mostrar el label después de realizar el cálculo
+
+    except ValueError as ve:
+        messagebox.showerror("Error", str(ve))
+    except ZeroDivisionError:
+        messagebox.showerror("Error", "No se puede dividir por cero. Verifique las entradas.")
+
+# Función para mostrar la tabla de amortización en el lado derecho
+def mostrar_amortizacion(detalles):
+    for i in tree.get_children():
+        tree.delete(i)
+
+    for detalle in detalles:
+        tree.insert("", "end", values=(detalle["Periodo"], f"${detalle['Pago']:.2f}", f"${detalle['Interés']:.2f}", f"${detalle['Amortización']:.2f}", f"${detalle['Saldo Insoluto']:.2f}"))
+
+# Función para limpiar valores de entrada
+def limpiar_entrada(valor):
+    return valor.replace(',', '').replace(' ', '')
+
+# Función para habilitar o deshabilitar campos de entrada
+def actualizar_campos():
+    if opcion_var.get() == 3:
+        plazo_entry.config(state='disabled')
+        pago_mensual_entry.config(state='normal')
     else:
-        raise ValueError("Frecuencia no reconocida")
-    return tasa_anual
+        plazo_entry.config(state='normal')
+        pago_mensual_entry.config(state='disabled')
 
-def calcular_anualidad_vencida(pago, tasa, periodos):
-    valor_presente = pago * ((1 - (1 + tasa) ** -periodos) / tasa)
-    valor_futuro = pago * (((1 + tasa) ** periodos - 1) / tasa)
-    return valor_presente, valor_futuro
+# Función para exportar la tabla a Excel
+def exportar_excel():
+    detalles = [tree.item(item)["values"] for item in tree.get_children()]
+    df = pd.DataFrame(detalles, columns=["Periodo", "Pago", "Interés", "Amortización", "Saldo Insoluto"])
+    
+    file_path = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")])
+    if file_path:
+        df.to_excel(file_path, index=False)
+        messagebox.showinfo("Éxito", f"Archivo Excel guardado en: {file_path}")
 
-def calcular_anualidad_anticipada(pago, tasa, periodos):
-    valor_presente = pago * ((1 - (1 + tasa) ** -periodos) / tasa) * (1 + tasa)
-    valor_futuro = pago * (((1 + tasa) ** periodos - 1) / tasa) * (1 + tasa)
-    return valor_presente, valor_futuro
-
-def calcular_anualidad_perpetua(pago, tasa):
-    valor_presente = pago / tasa
-    return valor_presente
-
-def calcular_anualidad_diferida(pago, tasa, periodos_diferidos, periodos_anualidad):
-    valor_presente_vencida = pago * ((1 - (1 + tasa) ** -periodos_anualidad) / tasa)
-    valor_presente_diferida = valor_presente_vencida / ((1 + tasa) ** periodos_diferidos)
-    return valor_presente_diferida
-
-def calcular():
-    try:
-        pago = float(entry_pago.get())
-        tasa = float(entry_tasa.get())
-        periodos = int(entry_periodos.get())
-        frecuencia = frecuencia_var.get()
-
-        tasa_anual = convertir_tasa(tasa, frecuencia)
-
-        if tipo_var.get() == 1:
-            vp, vf = calcular_anualidad_vencida(pago, tasa_anual, periodos)
-            resultado = f"Valor Presente de la Anualidad Vencida: {vp:.2f}\nValor Futuro de la Anualidad Vencida: {vf:.2f}"
+# Función para exportar la tabla a PDF
+def exportar_pdf():
+    detalles = [tree.item(item)["values"] for item in tree.get_children()]
+    
+    file_path = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")])
+    if file_path:
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", size=12)
         
-        elif tipo_var.get() == 2:
-            vp, vf = calcular_anualidad_anticipada(pago, tasa_anual, periodos)
-            resultado = f"Valor Presente de la Anualidad Anticipada: {vp:.2f}\nValor Futuro de la Anualidad Anticipada: {vf:.2f}"
+        col_width = pdf.w / 5.5
+        row_height = pdf.font_size * 1.5
         
-        elif tipo_var.get() == 3:
-            vp = calcular_anualidad_perpetua(pago, tasa_anual)
-            resultado = f"Valor Presente de la Anualidad Perpetua: {vp:.2f}"
+        for row in [["Periodo", "Pago", "Interés", "Amortización", "Saldo Insoluto"]] + detalles:
+            for item in row:
+                pdf.cell(col_width, row_height, txt=str(item), border=1)
+            pdf.ln(row_height)
         
-        elif tipo_var.get() == 4:
-            periodos_diferidos = int(entry_periodos_diferidos.get())
-            vp = calcular_anualidad_diferida(pago, tasa_anual, periodos_diferidos, periodos)
-            resultado = f"Valor Presente de la Anualidad Diferida: {vp:.2f}"
-        
-        else:
-            resultado = "Tipo de anualidad no reconocido."
+        pdf.output(file_path)
+        messagebox.showinfo("Éxito", f"Archivo PDF guardado en: {file_path}")
 
-        messagebox.showinfo("Resultado", resultado)
+# Crear la interfaz gráfica
+ventana = tk.Tk()
+ventana.title("Calculadora de Amortización")
+ventana.geometry("900x600")  # Dimensiones iniciales, se ajustará automáticamente
 
-    except ValueError:
-        messagebox.showerror("Error", "Por favor, introduce valores válidos.")
+estilo = ttk.Style()
+estilo.theme_use('clam')
 
-def calcular_tasa_interes():
-    try:
-        valor_presente = float(entry_valor_presente.get())
-        pago = float(entry_pago_tasa.get())
-        periodos = int(entry_periodos_tasa.get())
-        tipo_interes = tipo_interes_combobox.get()
+# Estilo personalizado
+estilo.configure("TFrame", background="#E8E8E8")
+estilo.configure("TLabel", background="#E8E8E8", font=("Helvetica", 12))
+estilo.configure("TButton", background="#007ACC", foreground="white", font=("Helvetica", 12, "bold"))
+estilo.configure("TRadiobutton", background="#E8E8E8", font=("Helvetica", 12))
+estilo.configure("Treeview", font=("Helvetica", 10))
+estilo.configure("Treeview.Heading", font=("Helvetica", 12, "bold"), background="#007ACC", foreground="white")
 
-        # Definir las tasas de interés según el tipo seleccionado por el usuario
-        tasas_interes = {
-            "Bimensual": 24,
-            "Mensual": 12,
-            "Trimestral": 4,
-            "Cuatrimestral": 3,
-            "Bimestral": 6,
-            "Semestral": 2,
-            "Anual": 1
-        }
+# Variables
+opcion_var = tk.IntVar(value=1)
+capitalizacion_var = tk.IntVar(value=1)
+resultado_text = tk.StringVar()
 
-        # Obtener la frecuencia de la tasa de interés seleccionada
-        frecuencia = tasas_interes[tipo_interes]
+# Contenedor principal
+frame = ttk.Frame(ventana, padding="10")
+frame.grid(row=0, column=0, sticky="nsew")
 
-        def valor_presente_anualidad(tasa):
-            tasa_efectiva = (1 + tasa) ** frecuencia - 1
-            return pago * ((1 - (1 + tasa_efectiva) ** -periodos) / tasa_efectiva)
+# Configurar la redimensión de las filas y columnas
+ventana.grid_rowconfigure(0, weight=1)
+ventana.grid_columnconfigure(0, weight=1)
 
-        tasa_min = 0.00001
-        tasa_max = 1.0
-        epsilon = 1e-6
+frame.grid_rowconfigure(0, weight=1)
+frame.grid_rowconfigure(1, weight=1)
+frame.grid_columnconfigure(0, weight=1)
+frame.grid_columnconfigure(1, weight=3)  # Dar más peso a la columna derecha
 
-        while tasa_max - tasa_min > epsilon:
-            tasa_mid = (tasa_min + tasa_max) / 2
-            vp_mid = valor_presente_anualidad(tasa_mid)
+# Frame izquierdo
+frame_izquierdo = ttk.Frame(frame, padding="10")
+frame_izquierdo.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
 
-            if vp_mid < valor_presente:
-                tasa_max = tasa_mid
-            else:
-                tasa_min = tasa_mid
+# Frame derecho
+frame_derecho = ttk.Frame(frame, padding="10")
+frame_derecho.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
 
-        tasa_interes = (tasa_min + tasa_max) / 2
-        tasa_efectiva = frecuencia*((1 + tasa_interes) ** frecuencia - 1)
-        resultado = f"Tasa de Interés: {tasa_efectiva:.6f}"
+# Configuración de filas y columnas internas
+frame_izquierdo.grid_rowconfigure(14, weight=1)
+frame_derecho.grid_rowconfigure(0, weight=1)
+frame_derecho.grid_columnconfigure(0, weight=1)
 
-        messagebox.showinfo("Resultado", resultado )
-    except ValueError:
-        messagebox.showerror("Error", "Por favor, ingrese valores numéricos válidos.")
+# Componentes del frame izquierdo
+ttk.Label(frame_izquierdo, text="Monto del préstamo:").grid(row=0, column=0, sticky="w", pady=2)
+monto_entry = ttk.Entry(frame_izquierdo)
+monto_entry.grid(row=0, column=1, sticky="ew", pady=2)
 
-def mostrar_calculadora_anualidades():
-    frame_menu_principal.pack_forget()
-    frame_tasa_interes.pack_forget()
+ttk.Label(frame_izquierdo, text="Tasa de interés anual (%):").grid(row=1, column=0, sticky="w", pady=2)
+tasa_entry = ttk.Entry(frame_izquierdo)
+tasa_entry.grid(row=1, column=1, sticky="ew", pady=2)
 
-    # Crear y mostrar la calculadora de anualidades
-    frame_anualidades.pack()
+ttk.Label(frame_izquierdo, text="Periodo de capitalización:").grid(row=2, column=0, sticky="w", pady=2)
+capitalizacion_frame = ttk.Frame(frame_izquierdo)
+capitalizacion_frame.grid(row=2, column=1, sticky="w", pady=2)
+ttk.Radiobutton(capitalizacion_frame, text="Mensual", variable=capitalizacion_var, value=1).pack(side="left")
+ttk.Radiobutton(capitalizacion_frame, text="Bimestral", variable=capitalizacion_var, value=2).pack(side="left")
+ttk.Radiobutton(capitalizacion_frame, text="Trimestral", variable=capitalizacion_var, value=3).pack(side="left")
+ttk.Radiobutton(capitalizacion_frame, text="Semestral", variable=capitalizacion_var, value=6).pack(side="left")
+ttk.Radiobutton(capitalizacion_frame, text="Anual", variable=capitalizacion_var, value=12).pack(side="left")
 
-    # Variables globales para los campos de entrada
-    global entry_pago, entry_tasa, entry_periodos, entry_periodos_diferidos, frecuencia_var, tipo_var
-    tipo_var = tk.IntVar()
-    frecuencia_var = tk.StringVar(value="Anual")
-    entry_pago = tk.Entry(frame_anualidades)
-    entry_tasa = tk.Entry(frame_anualidades)
-    entry_periodos = tk.Entry(frame_anualidades)
-    entry_periodos_diferidos = tk.Entry(frame_anualidades)
+ttk.Label(frame_izquierdo, text="Seleccione una opción:").grid(row=3, column=0, sticky="w", pady=2)
+opciones_frame = ttk.Frame(frame_izquierdo)
+opciones_frame.grid(row=3, column=1, sticky="w", pady=2)
+ttk.Radiobutton(opciones_frame, text="Calcular pago mensual", variable=opcion_var, value=1, command=actualizar_campos).pack(anchor="w")
+ttk.Radiobutton(opciones_frame, text="Calcular intereses totales", variable=opcion_var, value=2, command=actualizar_campos).pack(anchor="w")
+ttk.Radiobutton(opciones_frame, text="Calcular duración del préstamo", variable=opcion_var, value=3, command=actualizar_campos).pack(anchor="w")
+ttk.Radiobutton(opciones_frame, text="Generar tabla de amortización", variable=opcion_var, value=4, command=actualizar_campos).pack(anchor="w")
 
-    # Etiquetas y campos de entrada
-    tk.Label(frame_anualidades, text="Pago periódico:").grid(row=0, column=0, sticky="e")
-    entry_pago.grid(row=0, column=1)
+ttk.Label(frame_izquierdo, text="Periodo (meses):").grid(row=4, column=0, sticky="w", pady=2)
+plazo_entry = ttk.Entry(frame_izquierdo)
+plazo_entry.grid(row=4, column=1, sticky="ew", pady=2)
 
-    tk.Label(frame_anualidades, text="Tasa de interés (como decimal):").grid(row=1, column=0, sticky="e")
-    entry_tasa.grid(row=1, column=1)
+ttk.Label(frame_izquierdo, text="Renta (Si conoce su valor):").grid(row=5, column=0, sticky="w", pady=2)
+pago_mensual_entry = ttk.Entry(frame_izquierdo, state="disabled")
+pago_mensual_entry.grid(row=5, column=1, sticky="ew", pady=2)
 
-    tk.Label(frame_anualidades, text="Número de periodos:").grid(row=2, column=0, sticky="e")
-    entry_periodos.grid(row=2, column=1)
+ttk.Button(frame_izquierdo, text="Calcular", command=realizar_calculo).grid(row=6, column=0, columnspan=2, pady=10)
 
-    tk.Label(frame_anualidades, text="Número de periodos diferidos:").grid(row=3, column=0, sticky="e")
-    entry_periodos_diferidos.grid(row=3, column=1)
+# Resultado
+resultado_label = ttk.Label(frame_izquierdo, textvariable=resultado_text, font=("Helvetica", 12, "bold"))
+resultado_label.grid(row=7, column=0, columnspan=2, sticky="ew", pady=10)
+resultado_label.grid_remove()  # Inicialmente oculto
 
-    # Opciones de tipo de anualidad
-    tk.Radiobutton(frame_anualidades, text="Anualidad Vencida", variable=tipo_var, value=1).grid(row=4, column=0, columnspan=2, sticky="w")
-    tk.Radiobutton(frame_anualidades, text="Anualidad Anticipada", variable=tipo_var, value=2).grid(row=5, column=0, columnspan=2, sticky="w")
-    tk.Radiobutton(frame_anualidades, text="Anualidad Perpetua", variable=tipo_var, value=3).grid(row=6, column=0, columnspan=2, sticky="w")
-    tk.Radiobutton(frame_anualidades, text="Anualidad Diferida", variable=tipo_var, value=4).grid(row=7, column=0, columnspan=2, sticky="w")
+# Componentes del frame derecho (tabla de amortización)
+columnas = ("Periodo", "Pago", "Interés", "Amortización", "Saldo Insoluto")
+tree = ttk.Treeview(frame_derecho, columns=columnas, show="headings")
+for col in columnas:
+    tree.heading(col, text=col)
+    tree.column(col, anchor="center", width=150)  # Ajustar el ancho de las columnas
 
-    # Opciones de frecuencia de conversión de la tasa de interés
-    tk.Label(frame_anualidades, text="Frecuencia de la tasa de interés:").grid(row=8, column=0, sticky="e")
-    frecuencia_menu = tk.OptionMenu(frame_anualidades, frecuencia_var, "Bimensual","Mensual",  "Trimestral", "Cuatrimestral","Bimestral", "Semestral", "Anual")
-    frecuencia_menu.grid(row=8, column=1, sticky="w")
+tree.grid(row=0, column=0, sticky="nsew")
 
-    # Botón de cálculo para anualidades
-    tk.Button(frame_anualidades, text="Calcular Anualidad", command=calcular).grid(row=9, column=0, columnspan=2)
+# Botones de exportación
+botones_frame = ttk.Frame(frame_derecho)
+botones_frame.grid(row=1, column=0, pady=10)
 
-    # Botón de regresar
-    tk.Button(frame_anualidades, text="Regresar al Menú Principal", command=mostrar_menu_principal).grid(row=10, column=0, columnspan=2)
+ttk.Button(botones_frame, text="Exportar a Excel", command=exportar_excel).grid(row=0, column=0, padx=5)
+ttk.Button(botones_frame, text="Exportar a PDF", command=exportar_pdf).grid(row=0, column=1, padx=5)
 
-def mostrar_calculadora_tasa_interes():
-    frame_menu_principal.pack_forget()
-    frame_anualidades.pack_forget()
-
-    # Crear y mostrar la calculadora de tasa de interés
-    frame_tasa_interes.pack()
-
-    # Variables globales para los campos de entrada
-    global entry_valor_presente, entry_pago_tasa, entry_periodos_tasa, tipo_interes_combobox
-    entry_valor_presente = tk.Entry(frame_tasa_interes)
-    entry_pago_tasa = tk.Entry(frame_tasa_interes)
-    entry_periodos_tasa = tk.Entry(frame_tasa_interes)
-
-    # Etiquetas y campos de entrada
-    tk.Label(frame_tasa_interes, text="Valor Presente:").grid(row=0, column=0, sticky="e")
-    entry_valor_presente.grid(row=0, column=1)
-
-    tk.Label(frame_tasa_interes, text="Pago Periódico:").grid(row=1, column=0, sticky="e")
-    entry_pago_tasa.grid(row=1, column=1)
-
-    tk.Label(frame_tasa_interes, text="Número de Periodos:").grid(row=2, column=0, sticky="e")
-    entry_periodos_tasa.grid(row=2, column=1)
-
-    # Menú desplegable para elegir el tipo de interés
-    tk.Label(frame_tasa_interes, text="Tipo de Interés:").grid(row=3, column=0, sticky="e")
-    tipos_interes = ["Bimensual","Mensual",  "Trimestral", "Cuatrimestral", "Bimestral","Semestral", "Anual"]
-    tipo_interes_combobox = ttk.Combobox(frame_tasa_interes, values=tipos_interes, state="readonly")
-    tipo_interes_combobox.current(0)
-    tipo_interes_combobox.grid(row=3, column=1)
-
-    # Botón de cálculo para tasa de interés
-    tk.Button(frame_tasa_interes, text="Calcular Tasa de Interés", command=calcular_tasa_interes).grid(row=4, column=0, columnspan=2)
-
-    # Botón de regresar
-    tk.Button(frame_tasa_interes, text="Regresar al Menú Principal", command=mostrar_menu_principal).grid(row=5, column=0, columnspan=2)
-
-def mostrar_menu_principal():
-    frame_anualidades.pack_forget()
-    frame_tasa_interes.pack_forget()
-
-    # Crear y mostrar el menú principal
-    frame_menu_principal.pack()
-
-root = tk.Tk()
-root.title("Calculadoras Financieras")
-root.geometry("400x300")
-
-frame_anualidades = tk.Frame(root)
-frame_tasa_interes = tk.Frame(root)
-
-frame_menu_principal = tk.Frame(root)
-frame_menu_principal.pack()
-
-# Botón para ir a calculadora de anualidades
-tk.Button(frame_menu_principal, text="Ir a Calculadora de Anualidades", command=mostrar_calculadora_anualidades).pack()
-
-# Botón para ir a calculadora de tasa de interés
-tk.Button(frame_menu_principal, text="Ir a Calculadora de Tasa de Interés", command=mostrar_calculadora_tasa_interes).pack()
-
-root.mainloop()
+# Ejecutar aplicación
+ventana.mainloop()
